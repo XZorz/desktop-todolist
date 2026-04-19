@@ -46,10 +46,15 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showRepeatSelect, setShowRepeatSelect] = useState<string | null>(null);
   const [colWidth, setColWidth] = useState<number>(100);
+  const [colHeights, setColHeights] = useState<Record<string, number>>({});
   const timeInputRef = useRef<HTMLInputElement>(null);
   const isResizingW = useRef(false);
+  const isResizingH = useRef(false);
   const resizeStartX = useRef(0);
   const resizeStartWidth = useRef(0);
+  const resizeStartY = useRef(0);
+  const resizeStartHeight = useRef(0);
+  const resizingColKey = useRef<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -118,6 +123,30 @@ function App() {
     isResizingW.current = false;
     document.removeEventListener("mousemove", handleResizeMove);
     document.removeEventListener("mouseup", handleResizeEnd);
+  };
+
+  const handleHeightResizeStart = (e: React.MouseEvent, colKey: string) => {
+    e.stopPropagation();
+    isResizingH.current = true;
+    resizingColKey.current = colKey;
+    resizeStartY.current = e.clientY;
+    resizeStartHeight.current = colHeights[colKey] || 90;
+    document.addEventListener("mousemove", handleHeightResizeMove);
+    document.addEventListener("mouseup", handleHeightResizeEnd);
+  };
+
+  const handleHeightResizeMove = (e: MouseEvent) => {
+    if (!isResizingH.current || !resizingColKey.current) return;
+    const delta = e.clientY - resizeStartY.current;
+    const newHeight = Math.max(60, Math.min(300, resizeStartHeight.current + delta));
+    setColHeights(prev => ({ ...prev, [resizingColKey.current!]: newHeight }));
+  };
+
+  const handleHeightResizeEnd = () => {
+    isResizingH.current = false;
+    resizingColKey.current = null;
+    document.removeEventListener("mousemove", handleHeightResizeMove);
+    document.removeEventListener("mouseup", handleHeightResizeEnd);
   };
 
   const formatDate = (date: Date): string => {
@@ -305,11 +334,13 @@ function App() {
             const isSelected = dateStr === selectedDate;
             const isWeekend = i >= 5;
             const dayTodos = getTodosForDate(dateStr);
+            const thisColHeight = colHeights[dateStr] || 90;
 
             return (
               <div
                 key={i}
                 className={`day-col ${isToday ? "today" : ""} ${isSelected ? "selected" : ""} ${isWeekend ? "weekend" : ""} ${dragOverDate === dateStr ? "drag-over" : ""}`}
+                style={{ height: thisColHeight }}
                 onClick={() => setSelectedDate(dateStr)}
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -355,6 +386,7 @@ function App() {
                     <div className="has-todo-dot" />
                   )}
                 </div>
+                <div className="day-col-resize" onMouseDown={(e) => handleHeightResizeStart(e, dateStr)}>—</div>
               </div>
             );
           })}
@@ -464,7 +496,19 @@ function App() {
         .col-resize-handle { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: ew-resize; font-size: 14px; border-radius: 4px; user-select: none; }
         .col-resize-handle:hover { background: rgba(255,255,255,0.1); color: var(--text); }
         .week-grid { display: grid; gap: 4px; }
-        .day-col { background: var(--card); border-radius: 6px; padding: 6px; min-height: 60px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; }
+        .day-col { background: var(--card); border-radius: 6px; padding: 6px; min-height: 60px; overflow: hidden; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; }
+        .day-col:hover { background: rgba(60,60,90,0.8); }
+        .day-col.today { border: 2px solid var(--accent); }
+        .day-col.selected { background: rgba(60,60,90,0.9); }
+        .day-col.drag-over { border: 2px dashed var(--accent); background: rgba(100,100,150,0.4); }
+        .day-col.weekend .day-name { color: var(--weekend); }
+        .day-col-resize { height: 6px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: ns-resize; font-size: 10px; border-radius: 2px; margin-top: auto; user-select: none; opacity: 0; transition: opacity 0.2s; }
+        .day-col:hover .day-col-resize { opacity: 1; }
+        .day-col-resize:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+        .day-header { display: flex; flex-direction: column; align-items: center; margin-bottom: 4px; }
+        .day-name { font-size: 10px; color: var(--text-dim); }
+        .day-num { font-size: 14px; font-weight: 600; }
+        .day-todos { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; }
         .day-col:hover { background: rgba(60,60,90,0.8); }
         .day-col.today { border: 2px solid var(--accent); }
         .day-col.selected { background: rgba(60,60,90,0.9); }
