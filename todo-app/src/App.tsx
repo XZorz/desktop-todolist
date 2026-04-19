@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 
+type RepeatType = "none" | "daily" | "weekly" | "monthly" | "yearly";
+
 interface Todo {
   id: string;
   date: string;
   time: string;
   text: string;
   completed: boolean;
+  repeat: RepeatType;
   reminder: string;
 }
 
@@ -42,7 +45,11 @@ function App() {
   const [settings, setSettings] = useState<Settings>({ bgOpacity: 100, cardOpacity: 95, accentHue: 150 });
   const [showSettings, setShowSettings] = useState(false);
   const [showRepeatSelect, setShowRepeatSelect] = useState<string | null>(null);
+  const [colWidth, setColWidth] = useState<number>(100);
   const timeInputRef = useRef<HTMLInputElement>(null);
+  const isResizingW = useRef(false);
+  const resizeStartX = useRef(0);
+  const resizeStartWidth = useRef(0);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
@@ -88,6 +95,29 @@ function App() {
     if (Notification.permission === "default") {
       Notification.requestPermission();
     }
+  };
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    isResizingW.current = true;
+    resizeStartX.current = e.clientX;
+    resizeStartWidth.current = colWidth;
+    document.addEventListener("mousemove", handleResizeMove);
+    document.addEventListener("mouseup", handleResizeEnd);
+  };
+
+  const handleResizeMove = (e: MouseEvent) => {
+    if (!isResizingW.current) return;
+    const containerWidth = document.querySelector(".week-grid")?.clientWidth || 700;
+    const delta = e.clientX - resizeStartX.current;
+    const deltaPercent = (delta / containerWidth) * 100;
+    const newWidth = Math.max(50, Math.min(200, resizeStartWidth.current + deltaPercent));
+    setColWidth(newWidth);
+  };
+
+  const handleResizeEnd = () => {
+    isResizingW.current = false;
+    document.removeEventListener("mousemove", handleResizeMove);
+    document.removeEventListener("mouseup", handleResizeEnd);
   };
 
   const formatDate = (date: Date): string => {
@@ -200,6 +230,13 @@ function App() {
     }
   };
 
+  const moveTodo = (todoId: string, newDate: string) => {
+    setTodos(prev => prev.map(t => t.id === todoId ? { ...t, date: newDate } : t));
+  };
+
+  const [dragOverDate, setDragOverDate] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+
   const today = formatDate(new Date());
   const weekDays = getWeekDays(currentWeekStart);
   const weekDaysZh = ["一", "二", "三", "四", "五", "六", "日"];
@@ -258,9 +295,10 @@ function App() {
           <button onClick={() => changeWeek(-1)}>◀</button>
           <span className="week-label" onClick={goToToday}>{weekLabel}</span>
           <button onClick={() => changeWeek(1)}>▶</button>
+          <div className="col-resize-handle" onMouseDown={handleResizeStart}>⋮</div>
         </div>
 
-        <div className="week-grid">
+        <div className="week-grid" style={{ gridTemplateColumns: `repeat(7, ${colWidth}px)` }}>
           {weekDays.map((day, i) => {
             const dateStr = formatDate(day);
             const isToday = dateStr === today;
@@ -271,23 +309,48 @@ function App() {
             return (
               <div
                 key={i}
-                className={`day-col ${isToday ? "today" : ""} ${isSelected ? "selected" : ""} ${isWeekend ? "weekend" : ""}`}
+                className={`day-col ${isToday ? "today" : ""} ${isSelected ? "selected" : ""} ${isWeekend ? "weekend" : ""} ${dragOverDate === dateStr ? "drag-over" : ""}`}
                 onClick={() => setSelectedDate(dateStr)}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  setDragOverDate(dateStr);
+                }}
+                onDragLeave={() => setDragOverDate(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const todoId = e.dataTransfer.getData("todoId");
+                  if (todoId) {
+                    moveTodo(todoId, dateStr);
+                  }
+                  setDragOverDate(null);
+                  setDraggingId(null);
+                }}
               >
                 <div className="day-header">
                   <span className="day-name">{weekDaysZh[i]}</span>
                   <span className="day-num">{day.getDate()}</span>
                 </div>
                 <div className="day-todos">
-                  {dayTodos.slice(0, 3).map(todo => (
-                    <div key={todo.id} className={`mini-todo ${todo.completed ? "completed" : ""}`}>
+                  {dayTodos.map(todo => (
+                    <div
+                      key={todo.id}
+                      className={`mini-todo ${todo.completed ? "completed" : ""} ${draggingId === todo.id ? "dragging" : ""}`}
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData("todoId", todo.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        setDraggingId(todo.id);
+                      }}
+                      onDragEnd={() => {
+                        setDraggingId(null);
+                        setDragOverDate(null);
+                      }}
+                    >
                       <span className="mini-time">{todo.time}</span>
                       <span className="mini-text">{todo.text}</span>
                     </div>
                   ))}
-                  {dayTodos.length > 3 && (
-                    <div className="more-todos">+{dayTodos.length - 3}</div>
-                  )}
                   {hasTodos(day) && dayTodos.length === 0 && (
                     <div className="has-todo-dot" />
                   )}
@@ -393,28 +456,32 @@ function App() {
         .resize-handle.corner.tr { top: 0; right: 0; cursor: nesw-resize; }
         .resize-handle.corner.bl { bottom: 0; left: 0; cursor: nesw-resize; }
         .resize-handle.corner.br { bottom: 0; right: 0; cursor: nwse-resize; }
-        .week-view { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .week-view { padding: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); overflow-y: auto; }
         .week-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
         .week-nav button { width: 28px; height: 28px; border: none; background: var(--card); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 11px; transition: all 0.2s; }
         .week-nav button:hover { background: var(--accent); color: ${isDarkBg ? '#1a1a2e' : '#fff'}; }
         .week-label { font-size: 12px; font-weight: 600; cursor: pointer; }
-        .week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-        .day-col { background: var(--card); border-radius: 6px; padding: 6px; min-height: 80px; cursor: pointer; transition: all 0.2s; }
+        .col-resize-handle { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; color: var(--text-dim); cursor: ew-resize; font-size: 14px; border-radius: 4px; user-select: none; }
+        .col-resize-handle:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+        .week-grid { display: grid; gap: 4px; }
+        .day-col { background: var(--card); border-radius: 6px; padding: 6px; min-height: 60px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; }
         .day-col:hover { background: rgba(60,60,90,0.8); }
         .day-col.today { border: 2px solid var(--accent); }
         .day-col.selected { background: rgba(60,60,90,0.9); }
+        .day-col.drag-over { border: 2px dashed var(--accent); background: rgba(100,100,150,0.4); }
         .day-col.weekend .day-name { color: var(--weekend); }
         .day-header { display: flex; flex-direction: column; align-items: center; margin-bottom: 4px; }
         .day-name { font-size: 10px; color: var(--text-dim); }
         .day-num { font-size: 14px; font-weight: 600; }
         .day-todos { display: flex; flex-direction: column; gap: 2px; }
-        .mini-todo { background: rgba(0,0,0,0.2); border-radius: 3px; padding: 2px 4px; font-size: 10px; display: flex; gap: 3px; align-items: center; }
+        .mini-todo { background: rgba(0,0,0,0.2); border-radius: 3px; padding: 2px 4px; font-size: 10px; display: flex; gap: 3px; align-items: center; cursor: grab; }
         .mini-todo.completed { opacity: 0.5; text-decoration: line-through; }
+        .mini-todo.dragging { opacity: 0.4; }
         .mini-time { color: var(--accent); font-size: 9px; flex-shrink: 0; }
         .mini-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .more-todos { font-size: 9px; color: var(--text-dim); text-align: center; }
         .has-todo-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); margin: 2px auto; }
-        .detail { flex: 1; padding: 10px; display: flex; flex-direction: column; overflow: hidden; }
+        .detail { flex: 1; padding: 10px; display: flex; flex-direction: column; overflow-y: auto; }
         .detail-header h2 { font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--accent); }
         .add-form { display: flex; gap: 6px; margin-bottom: 6px; }
         .time-input { width: 70px; padding: 6px 8px; background: var(--card); border: 2px solid transparent; border-radius: 6px; color: var(--accent); font-size: 12px; outline: none; }
